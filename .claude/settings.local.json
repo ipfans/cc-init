@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(awk:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npm run:*)",
+      "Bash(pdm run:*)",
+      "mcp__ide__getDiagnostics",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "Bash(task:*)"
+    ],
+    "deny": []
+  }
+}
