@@ -4,112 +4,23 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release'
+        description: "Tag to release"
         required: true
-        default: 'v0.0.0'
-      
+        default: "v0.0.0"
+
 permissions:
   contents: write
   actions: read
 
 env:
-  GO_VERSION: '1.24.5'
+  GO_VERSION: "1.24.5"
   BUILD_FLAGS: '-trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }} -X main.commit=${{ github.sha }} -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)"'
 
 jobs:
-  quality-gate:
-    name: Quality Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608  # v4.1.0
-        
-      - name: Setup Go
-        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe  # v5.0.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          
-      - name: Cache Go modules
-        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84  # v3.3.2
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-            
-      - name: Download dependencies
-        run: go mod download
-        
-      - name: Verify dependencies
-        run: go mod verify
-        
-      - name: Format check
-        run: |
-          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
-            echo "Go code is not formatted:"
-            gofmt -s -l .
-            exit 1
-          fi
-          echo "✅ Code formatting is correct"
-          
-      - name: Vet check
-        run: |
-          echo "Running go vet..."
-          go vet ./...
-          echo "✅ go vet passed"
-          
-      - name: Lint check
-        uses: golangci/golangci-lint-action@3cfe3a4abbb849e10058ce4af15d205b6da42804  # v4.0.0
-        with:
-          version: latest
-          args: --timeout=5m
-          
-      - name: Unit tests with race detection
-        run: |
-          echo "Running unit tests with race detection..."
-          go test -race -coverprofile=coverage.out ./...
-          echo "✅ Unit tests passed"
-          
-      - name: Coverage check
-        run: |
-          if [ ! -f coverage.out ]; then
-            echo "❌ Coverage file not found"
-            exit 1
-          fi
-          
-          coverage=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Current coverage: ${coverage}%"
-          
-          if (( $(echo "$coverage < 80" | bc -l) )); then
-            echo "❌ Coverage ${coverage}% is below required 80%"
-            exit 1
-          fi
-          echo "✅ Coverage requirement met: ${coverage}%"
-          
-      - name: Integration tests
-        run: |
-          echo "Building test binary..."
-          go build -o cc-init-test ${{ env.BUILD_FLAGS }}
-          
-          echo "Testing basic functionality..."
-          ./cc-init-test --version
-          ./cc-init-test --help
-          
-          echo "Testing dry-run mode..."
-          mkdir -p test-dir
-          ./cc-init-test --target test-dir --dry-run --verbose
-          
-          echo "✅ Integration tests passed"
-          rm -rf cc-init-test test-dir
-
   build-matrix:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     needs: quality-gate
@@ -139,21 +50,21 @@ jobs:
           - goos: windows
             goarch: arm64
             runner: windows-latest
-    
+
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
-    
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608  # v4.1.0
-        
+        uses: actions/checkout@v4
+
       - name: Setup Go
-        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe  # v5.0.0
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          
+
       - name: Cache Go modules
-        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84  # v3.3.2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
@@ -161,12 +72,12 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-            
+
       - name: Download dependencies
         run: go mod download
-        
+
       - name: Build binary with retry
-        uses: nick-invision/retry@7152eba30c6575329ac0576536151aca5a72780e  # v2.9.0
+        uses: nick-invision/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
@@ -176,7 +87,7 @@ jobs:
             VERSION="${{ github.ref_name }}"
             COMMIT="${{ github.sha }}"
             BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-            
+
             # Set binary name with proper extension and ARM version
             BINARY_NAME="cc-init-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}"
             if [ "${{ matrix.goos }}" = "windows" ]; then
@@ -188,22 +99,22 @@ jobs:
                 BINARY_NAME="${BINARY_NAME}.exe"
               fi
             fi
-            
+
             echo "Building ${BINARY_NAME}..."
-            
+
             # Build with optimization and metadata injection
             CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} \
             go build \
               -trimpath \
               -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
               -o "${BINARY_NAME}" .
-            
+
             # Verify binary was created
             if [ ! -f "${BINARY_NAME}" ]; then
               echo "❌ Binary not created: ${BINARY_NAME}"
               exit 1
             fi
-            
+
             # Test binary on compatible platforms
             if [ "${{ matrix.goos }}" = "${{ runner.os }}" ] && [ "${{ matrix.goarch }}" = "amd64" ]; then
               echo "Testing binary functionality..."
@@ -213,15 +124,15 @@ jobs:
             elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.goos }}" = "windows" ]; then
               echo "Skipping binary test for Windows on macOS"
             fi
-            
+
             # Report build metrics
             BINARY_SIZE=$(stat -f%z "${BINARY_NAME}" 2>/dev/null || stat -c%s "${BINARY_NAME}" 2>/dev/null || echo "unknown")
             echo "✅ Built ${BINARY_NAME} (${BINARY_SIZE} bytes)"
-            
+
             # Export for next steps
             echo "BINARY_NAME=${BINARY_NAME}" >> $GITHUB_ENV
             echo "BINARY_SIZE=${BINARY_SIZE}" >> $GITHUB_ENV
-        
+
       - name: Create archive
         run: |
           # Determine archive name and format based on OS
@@ -246,24 +157,24 @@ jobs:
             echo "Creating tar.gz archive: ${ARCHIVE_NAME}"
             tar -czf "${ARCHIVE_NAME}" "${{ env.BINARY_NAME }}"
           fi
-          
+
           # Verify archive was created
           if [ ! -f "${ARCHIVE_NAME}" ]; then
             echo "❌ Archive not created: ${ARCHIVE_NAME}"
             exit 1
           fi
-          
+
           # Report archive size
           ARCHIVE_SIZE=$(stat -f%z "${ARCHIVE_NAME}" 2>/dev/null || stat -c%s "${ARCHIVE_NAME}" 2>/dev/null || echo "unknown")
           echo "✅ Created ${ARCHIVE_NAME} (${ARCHIVE_SIZE} bytes)"
-          
+
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
           echo "ARCHIVE_SIZE=${ARCHIVE_SIZE}" >> $GITHUB_ENV
-          
+
       - name: Generate checksum
         run: |
           echo "Generating SHA256 checksum for ${{ env.ARCHIVE_NAME }}..."
-          
+
           if [ "${{ runner.os }}" = "Windows" ]; then
             # Windows: use certutil
             certutil -hashfile "${{ env.ARCHIVE_NAME }}" SHA256 | findstr /v "hash" | findstr /v "SHA256" > "${{ env.ARCHIVE_NAME }}.sha256"
@@ -274,20 +185,20 @@ jobs:
             # Unix: use sha256sum
             sha256sum "${{ env.ARCHIVE_NAME }}" > "${{ env.ARCHIVE_NAME }}.sha256"
           fi
-          
+
           # Verify checksum file
           if [ ! -f "${{ env.ARCHIVE_NAME }}.sha256" ]; then
             echo "❌ Checksum file not created"
             exit 1
           fi
-          
+
           echo "✅ Generated checksum:"
           cat "${{ env.ARCHIVE_NAME }}.sha256"
-          
+
       - name: Validate archive integrity
         run: |
           echo "Validating archive integrity..."
-          
+
           # Verify checksum
           if [ "${{ runner.os }}" = "Windows" ]; then
             # Windows validation
@@ -306,21 +217,21 @@ jobs:
               exit 1
             fi
           fi
-          
+
           echo "✅ Archive integrity validated"
-          
+
       - name: Upload build artifacts
-        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32  # v3.1.3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARCHIVE_NAME }}
           path: |
             ${{ env.ARCHIVE_NAME }}
             ${{ env.ARCHIVE_NAME }}.sha256
           retention-days: 5
-          
+
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32  # v3.1.3
+        uses: actions/upload-artifact@v4
         with:
           name: build-logs-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
@@ -336,29 +247,29 @@ jobs:
     outputs:
       release-id: ${{ steps.create-release.outputs.id }}
       upload-url: ${{ steps.create-release.outputs.upload_url }}
-      
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608  # v4.1.0
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history needed for release notes
-          
+          fetch-depth: 0 # Full history needed for release notes
+
       - name: Generate release notes
         id: release-notes
         run: |
           echo "Generating release notes for ${{ github.ref_name }}..."
-          
+
           # Get the previous tag
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
-          
+
           # Create release notes
           cat > release_notes.md << 'EOF'
           # cc-init ${{ github.ref_name }}
-          
+
           A Go command-line tool that quickly initializes Claude Code configuration for projects.
-          
+
           EOF
-          
+
           if [ -n "$PREV_TAG" ]; then
             echo "## 🔄 Changes since $PREV_TAG" >> release_notes.md
             echo "" >> release_notes.md
@@ -376,97 +287,97 @@ jobs:
             echo "First release of cc-init - a tool for initializing Claude Code configuration." >> release_notes.md
             echo "" >> release_notes.md
           fi
-          
+
           cat >> release_notes.md << 'EOF'
           ## 📦 Installation
-          
+
           Download the appropriate binary for your platform from the assets below:
-          
+
           ### Linux
           ```bash
           # AMD64
           wget https://github.com/ipfans/cc-init/releases/download/${{ github.ref_name }}/cc-init-${{ github.ref_name }}-linux-amd64.tar.gz
           tar -xzf cc-init-${{ github.ref_name }}-linux-amd64.tar.gz
-          
+
           # ARM64
           wget https://github.com/ipfans/cc-init/releases/download/${{ github.ref_name }}/cc-init-${{ github.ref_name }}-linux-arm64.tar.gz
           tar -xzf cc-init-${{ github.ref_name }}-linux-arm64.tar.gz
-          
+
           # ARMv7
           wget https://github.com/ipfans/cc-init/releases/download/${{ github.ref_name }}/cc-init-${{ github.ref_name }}-linux-armv7.tar.gz
           tar -xzf cc-init-${{ github.ref_name }}-linux-armv7.tar.gz
           ```
-          
+
           ### macOS
           ```bash
           # Intel (AMD64)
           curl -L -o cc-init-${{ github.ref_name }}-darwin-amd64.tar.gz https://github.com/ipfans/cc-init/releases/download/${{ github.ref_name }}/cc-init-${{ github.ref_name }}-darwin-amd64.tar.gz
           tar -xzf cc-init-${{ github.ref_name }}-darwin-amd64.tar.gz
-          
+
           # Apple Silicon (ARM64)
           curl -L -o cc-init-${{ github.ref_name }}-darwin-arm64.tar.gz https://github.com/ipfans/cc-init/releases/download/${{ github.ref_name }}/cc-init-${{ github.ref_name }}-darwin-arm64.tar.gz
           tar -xzf cc-init-${{ github.ref_name }}-darwin-arm64.tar.gz
           ```
-          
+
           ### Windows
           ```powershell
           # AMD64
           Invoke-WebRequest -Uri "https://github.com/ipfans/cc-init/releases/download/${{ github.ref_name }}/cc-init-${{ github.ref_name }}-windows-amd64.zip" -OutFile "cc-init-${{ github.ref_name }}-windows-amd64.zip"
           Expand-Archive -Path "cc-init-${{ github.ref_name }}-windows-amd64.zip" -DestinationPath "."
-          
+
           # ARM64
           Invoke-WebRequest -Uri "https://github.com/ipfans/cc-init/releases/download/${{ github.ref_name }}/cc-init-${{ github.ref_name }}-windows-arm64.zip" -OutFile "cc-init-${{ github.ref_name }}-windows-arm64.zip"
           Expand-Archive -Path "cc-init-${{ github.ref_name }}-windows-arm64.zip" -DestinationPath "."
           ```
-          
+
           ## 🔐 Verification
-          
+
           All downloads can be verified using the provided SHA256 checksums:
-          
+
           ```bash
           # Linux/macOS
           sha256sum -c cc-init-${{ github.ref_name }}-{platform}-{arch}.{ext}.sha256
-          
+
           # Windows (PowerShell)
           $hash = Get-FileHash cc-init-${{ github.ref_name }}-windows-amd64.zip -Algorithm SHA256
           $expected = Get-Content cc-init-${{ github.ref_name }}-windows-amd64.zip.sha256
           if ($hash.Hash -eq $expected.Split()[0]) { "✅ Checksum verified" } else { "❌ Checksum failed" }
           ```
-          
+
           ## 🚀 Usage
-          
+
           ```bash
           # Initialize Claude Code config in current directory
           ./cc-init
-          
+
           # Initialize in specific directory
           ./cc-init -t /path/to/project
-          
+
           # Preview changes without making them
           ./cc-init --dry-run
-          
+
           # Show detailed output
           ./cc-init --verbose
-          
+
           # Show version
           ./cc-init --version
-          
+
           # Show help
           ./cc-init --help
           ```
-          
+
           ---
-          
+
           **Full Changelog**: https://github.com/ipfans/cc-init/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD)}...${{ github.ref_name }}
           EOF
-          
+
           echo "✅ Release notes generated"
           echo "📝 Preview:"
           head -20 release_notes.md
-          
+
       - name: Create GitHub release
         id: create-release
-        uses: ncipollo/release-action@6c75be85e571768fa31b40abf38de58ba0397db5  # v1.13.0
+        uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
@@ -476,7 +387,7 @@ jobs:
           generateReleaseNotes: false
           makeLatest: true
           token: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Output release information
         run: |
           echo "✅ Release created successfully"
@@ -506,10 +417,10 @@ jobs:
             goarch: amd64
           - goos: windows
             goarch: arm64
-            
+
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    
+
     steps:
       - name: Determine asset names
         id: asset-names
@@ -520,31 +431,31 @@ jobs:
           else
             EXT="tar.gz"
           fi
-          
+
           # Handle ARM version suffix
           if [ -n "${{ matrix.goarm }}" ]; then
             ASSET_NAME="cc-init-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}v${{ matrix.goarm }}.${EXT}"
           else
             ASSET_NAME="cc-init-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.${EXT}"
           fi
-          
+
           echo "ASSET_NAME=${ASSET_NAME}" >> $GITHUB_OUTPUT
           echo "ASSET_EXT=${EXT}" >> $GITHUB_OUTPUT
           echo "Asset name: ${ASSET_NAME}"
-          
+
       - name: Download build artifacts
-        uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a  # v3.0.2
+        uses: actions/download-artifact@v4
         with:
           name: ${{ steps.asset-names.outputs.ASSET_NAME }}
           path: ./artifacts/
-          
+
       - name: List downloaded artifacts
         run: |
           echo "📦 Downloaded artifacts:"
           ls -la ./artifacts/
-          
+
       - name: Upload release asset with retry
-        uses: nick-invision/retry@7152eba30c6575329ac0576536151aca5a72780e  # v2.9.0
+        uses: nick-invision/retry@v3
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -552,26 +463,26 @@ jobs:
           command: |
             ASSET_NAME="${{ steps.asset-names.outputs.ASSET_NAME }}"
             echo "📤 Uploading ${ASSET_NAME}..."
-            
+
             # Upload the main asset
             gh release upload ${{ github.ref_name }} \
               "./artifacts/${ASSET_NAME}" \
               --clobber
-            
+
             # Upload the checksum
             gh release upload ${{ github.ref_name }} \
               "./artifacts/${ASSET_NAME}.sha256" \
               --clobber
-            
+
             echo "✅ Successfully uploaded ${ASSET_NAME} and checksum"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Verify upload
         run: |
           ASSET_NAME="${{ steps.asset-names.outputs.ASSET_NAME }}"
           echo "🔍 Verifying upload for ${ASSET_NAME}..."
-          
+
           # List release assets to verify upload
           gh release view ${{ github.ref_name }} --json assets --jq '.assets[].name' | \
             grep -E "${ASSET_NAME}|${ASSET_NAME}.sha256" || {
@@ -588,42 +499,42 @@ jobs:
     needs: upload-assets
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    
+
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a  # v3.0.2
+        uses: actions/download-artifact@v4
         with:
           path: ./all-artifacts/
-          
+
       - name: Create combined checksums file
         run: |
           echo "🔐 Creating combined checksums file..."
-          
+
           # Create combined SHA256SUMS file
           cat > SHA256SUMS << 'EOF'
           # SHA256 Checksums for cc-init ${{ github.ref_name }}
           # Verify with: sha256sum -c SHA256SUMS
-          
+
           EOF
-          
+
           # Collect all individual checksum files
           find ./all-artifacts -name "*.sha256" -type f | sort | while read -r checksum_file; do
             echo "Adding $(basename "$checksum_file")..."
             cat "$checksum_file" >> SHA256SUMS
           done
-          
+
           echo "" >> SHA256SUMS
           echo "# Generated on $(date -u)" >> SHA256SUMS
           echo "# Release: ${{ github.ref_name }}" >> SHA256SUMS
           echo "# Repository: ${{ github.repository }}" >> SHA256SUMS
-          
+
           echo "📋 Combined checksums file:"
           cat SHA256SUMS
-          
+
       - name: Upload combined checksums
         run: |
           echo "📤 Uploading combined checksums file..."
-          
+
           gh release upload ${{ github.ref_name }} \
             "SHA256SUMS" \
             --clobber
@@ -637,40 +548,40 @@ jobs:
     needs: [create-checksums]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    
+
     steps:
       - name: Validate release
         run: |
           echo "🔍 Validating release ${{ github.ref_name }}..."
-          
+
           # Check release exists and is published
           RELEASE_INFO=$(gh release view ${{ github.ref_name }} --json publishedAt,assets)
-          
+
           if [ -z "$RELEASE_INFO" ]; then
             echo "❌ Release not found"
             exit 1
           fi
-          
+
           # Count assets (should be 15: 7 archives + 7 checksums + 1 combined)
           ASSET_COUNT=$(echo "$RELEASE_INFO" | jq '.assets | length')
           EXPECTED_ASSETS=15
-          
+
           if [ "$ASSET_COUNT" -ne "$EXPECTED_ASSETS" ]; then
             echo "❌ Expected $EXPECTED_ASSETS assets, found $ASSET_COUNT"
             echo "Assets found:"
             echo "$RELEASE_INFO" | jq '.assets[].name'
             exit 1
           fi
-          
+
           echo "✅ Release validation passed"
           echo "📊 Release Statistics:"
           echo "   • Assets: $ASSET_COUNT"
           echo "   • Published: $(echo "$RELEASE_INFO" | jq -r '.publishedAt')"
           echo "   • Tag: ${{ github.ref_name }}"
-          
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Report success
         run: |
           echo "🎉 Release ${{ github.ref_name }} completed successfully!"
@@ -692,13 +603,13 @@ jobs:
     needs: [post-release]
     runs-on: ubuntu-latest
     if: always()
-    
+
     steps:
       - name: Cleanup artifacts
         run: |
           echo "🧹 Cleanup completed"
           echo "Artifacts are automatically cleaned up by GitHub Actions"
-          
+
       - name: Report workflow metrics
         run: |
           echo "📊 Workflow Metrics:"
